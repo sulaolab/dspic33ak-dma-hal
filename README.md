@@ -170,8 +170,12 @@ Global:
 Per channel:
 
 - `dspic33ak_dma_channel_config()` — configure a channel and leave it disabled.
-  Returns false (and writes no register) for a NULL config, invalid channel, or
-  when the controller is not ready.
+  Returns false (and writes no register) for a NULL config, invalid channel,
+  controller not ready, or an out-of-range enum / IRQ priority in the config.
+  Re-config safe: masks the channel's CPU IRQ and clears stale `DMAxSTAT` /
+  `_DMAxIF` before and after programming, so a leftover interrupt or `HALF` /
+  `DONE` status from a previous run cannot disturb a stop → re-config → restart
+  cycle.
 - `dspic33ak_dma_channel_enable()` — set/clear `CHEN` (start/stop the channel).
 - `dspic33ak_dma_irq_enable()` — set/clear the channel's CPU interrupt enable
   (`_DMAxIE`) independently of `CHEN`.
@@ -193,6 +197,22 @@ Ping-pong / ISR hot path:
 - `dspic33ak_dma_isr_snapshot()` — inline: clear `_DMAxIF`, snapshot `DMAxSTAT`,
   clear `DMAxSTAT`; returns the raw snapshot. Call with a compile-time-constant
   channel.
+
+## Behavior Notes
+
+- **`count` semantics.** `dspic33ak_dma_channel_cfg_t.count` is written verbatim
+  to `DMAxCNT`. On dsPIC33AK `DMAxCNT` is the number of elements (of the
+  configured `size`) to transfer per repeat — it is **not** an "elements − 1"
+  register. Pass the element count of one ping-pong half.
+- **Invalid-channel convention** (channel index ≥ the device channel count):
+  - `config` / `enable` return `false` and write nothing.
+  - `void` IRQ/status helpers silently ignore the call.
+  - read helpers return `0`.
+- **ISR snapshot ordering.** `dspic33ak_dma_isr_snapshot()` performs an *ordered*
+  sequence (`_DMAxIF=0`, read `DMAxSTAT`, `DMAxSTAT=0`), not a single atomic
+  instruction. The order is chosen so a `HALF` / `DONE` event raised mid-sequence
+  stays latched rather than being lost; confirm the latching behavior against the
+  device data sheet for the DMA modes you use.
 
 ## Notes
 
